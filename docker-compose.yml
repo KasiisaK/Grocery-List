@@ -1,0 +1,106 @@
+services:
+  # Application database, using the offical image 
+  postgres:
+    image: postgres:16-alpine
+    container_name: grocery-postgres
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+      POSTGRES_DB: ${POSTGRES_DB}
+    volumes:
+      - postgres-data:/var/lib/postgresql/data
+    ports:
+      - "127.0.0.1:5432:5432"      # localhost for local Flask testing
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U $${POSTGRES_USER} -d $${POSTGRES_DB}"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+      start_period: 5s
+    networks: [grocery-network]
+    restart: unless-stopped
+
+  # Keycloak database
+  keycloak-db:
+    image: postgres:16-alpine
+    container_name: grocery-keycloak-db
+    environment:
+      POSTGRES_USER: keycloak
+      POSTGRES_PASSWORD: ${KEYCLOAK_DB_PASSWORD}
+      POSTGRES_DB: keycloak
+    volumes:
+      - keycloak-db-data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U keycloak -d keycloak"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+      start_period: 5s
+    networks: [grocery-network]
+    restart: unless-stopped
+
+  # Keycloak: login, registration, tokens (development mode)
+  keycloak:
+    image: quay.io/keycloak/keycloak:26.0.7
+    container_name: grocery-keycloak
+    command: start-dev
+    environment:
+      KC_BOOTSTRAP_ADMIN_USERNAME: admin
+      KC_BOOTSTRAP_ADMIN_PASSWORD: ${KEYCLOAK_ADMIN_PASSWORD}
+      KC_DB: postgres
+      KC_DB_URL: jdbc:postgresql://keycloak-db:5432/keycloak
+      KC_DB_USERNAME: keycloak
+      KC_DB_PASSWORD: ${KEYCLOAK_DB_PASSWORD}
+      KC_HOSTNAME: http://localhost:8081   # the address the browser uses
+    ports:
+      - "8081:8080"   # 8080 on the host is the frontend
+    depends_on:
+      keycloak-db:
+        condition: service_healthy
+    networks: [grocery-network]
+    restart: unless-stopped
+
+  # Flask API
+  backend:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    container_name: grocery-backend
+    ports:
+      - "8000:8000"
+    environment:
+      PYTHONUNBUFFERED: "1"
+      DATABASE_URL: postgresql://${POSTGRES_USER}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB}
+      # Tokens say they were issued by the address the browser used...
+      KEYCLOAK_ISSUER: http://localhost:8081/realms/grocery
+      # ...but the backend fetches the public keys over the Docker network.
+      KEYCLOAK_JWKS_URL: http://keycloak:8080/realms/grocery/protocol/openid-connect/certs
+      KEYCLOAK_CLIENT_ID: grocery-frontend
+    depends_on:
+      postgres:
+        condition: service_healthy
+    networks: [grocery-network]
+    restart: unless-stopped
+
+  # React frontend
+  #frontend:
+  #  build:
+  #    context: ./frontend
+  #    dockerfile: Dockerfile
+  #    args:
+  #      VITE_API_URL: http://localhost:8000
+  #  container_name: grocery-frontend
+  #  ports:
+  #    - "8080:80"
+  #  depends_on:
+  #    - backend
+  #  networks: [grocery-network]
+  #  restart: unless-stopped
+
+volumes:
+  postgres-data:
+  keycloak-db-data:
+
+networks:
+  grocery-network:
+    driver: bridge

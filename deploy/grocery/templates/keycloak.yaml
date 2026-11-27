@@ -1,0 +1,75 @@
+{{- $kdb := index .Values.databases "keycloak-db" }}
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: keycloak
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: keycloak
+  template:
+    metadata:
+      labels:
+        app: keycloak
+    spec:
+      enableServiceLinks: false
+      containers:
+        - name: keycloak
+          image: {{ .Values.images.keycloak }}
+          args: ["start"]
+          ports:
+            - containerPort: 8080
+          env:
+            - name: KC_BOOTSTRAP_ADMIN_USERNAME
+              value: admin
+            - name: KC_BOOTSTRAP_ADMIN_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: {{ .Values.secretName }}
+                  key: KEYCLOAK_ADMIN_PASSWORD
+            - name: KC_DB
+              value: postgres
+            - name: KC_DB_URL
+              value: {{ printf "jdbc:postgresql://keycloak-db:5432/%s" $kdb.db | quote }}
+            - name: KC_DB_USERNAME
+              value: {{ $kdb.user | quote }}
+            - name: KC_DB_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: {{ .Values.secretName }}
+                  key: {{ $kdb.passwordKey }}
+            # Traefik terminates HTTPS and forwards plain HTTP with X-Forwarded-* headers
+            - name: KC_HTTP_ENABLED
+              value: "true"
+            - name: KC_PROXY_HEADERS
+              value: xforwarded
+            # Keycloak lives under /auth on the same domain as the app
+            - name: KC_HTTP_RELATIVE_PATH
+              value: /auth
+            - name: KC_HOSTNAME
+              value: {{ printf "https://%s/auth" .Values.domain | quote }}
+          # Keycloak needs a while to start, so allow up to ~7 minutes before giving up
+          startupProbe:
+            tcpSocket:
+              port: 8080
+            periodSeconds: 10
+            failureThreshold: 40
+          readinessProbe:
+            tcpSocket:
+              port: 8080
+            periodSeconds: 10
+          resources:
+            requests:
+              memory: 512Mi
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: keycloak
+spec:
+  selector:
+    app: keycloak
+  ports:
+    - port: 8080
+      targetPort: 8080

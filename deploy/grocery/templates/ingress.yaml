@@ -1,0 +1,39 @@
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: grocery
+  annotations:
+    cert-manager.io/cluster-issuer: {{ .Values.clusterIssuer }}
+spec:
+  ingressClassName: traefik
+  tls:
+    - hosts:
+        - {{ .Values.domain }}
+      # The issuer is part of the name, so switching staging -> prod makes a NEW certificate
+      secretName: grocery-tls-{{ .Values.clusterIssuer }}
+  rules:
+    - host: {{ .Values.domain }}
+      http:
+        paths:
+          # The most specific matching path wins
+          - path: /auth
+            pathType: Prefix
+            backend:
+              service:
+                name: keycloak
+                port:
+                  number: 8080
+          - path: /api
+            pathType: Prefix
+            backend:
+              service:
+                name: backend
+                port:
+                  number: 8000
+          - path: /
+            pathType: Prefix
+            backend:
+              service:
+                name: frontend
+                port:
+                  number: 80

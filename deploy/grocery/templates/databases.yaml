@@ -1,0 +1,63 @@
+{{- range $name, $db := .Values.databases }}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ $name }}
+spec:
+  selector:
+    app: {{ $name }}
+  ports:
+    - port: 5432
+      targetPort: 5432
+---
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: {{ $name }}
+spec:
+  serviceName: {{ $name }}
+  replicas: 1
+  selector:
+    matchLabels:
+      app: {{ $name }}
+  template:
+    metadata:
+      labels:
+        app: {{ $name }}
+    spec:
+      enableServiceLinks: false
+      containers:
+        - name: postgres
+          image: {{ $.Values.images.postgres }}
+          ports:
+            - containerPort: 5432
+          env:
+            - name: POSTGRES_USER
+              value: {{ $db.user | quote }}
+            - name: POSTGRES_DB
+              value: {{ $db.db | quote }}
+            - name: POSTGRES_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: {{ $.Values.secretName }}
+                  key: {{ $db.passwordKey }}
+            - name: PGDATA
+              value: /var/lib/postgresql/data/pgdata
+          readinessProbe:
+            exec:
+              command: ["pg_isready", "-U", {{ $db.user | quote }}, "-d", {{ $db.db | quote }}]
+            initialDelaySeconds: 5
+            periodSeconds: 5
+          volumeMounts:
+            - name: data
+              mountPath: /var/lib/postgresql/data
+  volumeClaimTemplates:
+    - metadata:
+        name: data
+      spec:
+        accessModes: ["ReadWriteOnce"]
+        resources:
+          requests:
+            storage: {{ $db.storage }}
+{{- end }}

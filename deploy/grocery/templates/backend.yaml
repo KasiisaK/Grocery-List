@@ -1,0 +1,67 @@
+{{- $pg := .Values.databases.postgres }}
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: backend
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: backend
+  template:
+    metadata:
+      labels:
+        app: backend
+    spec:
+      enableServiceLinks: false
+      initContainers:
+        # Wait until the database accepts connections before starting the API
+        - name: wait-for-postgres
+          image: {{ .Values.images.postgres }}
+          command: ["sh", "-c", "until pg_isready -h postgres -p 5432; do echo waiting for postgres; sleep 2; done"]
+      containers:
+        - name: backend
+          image: {{ .Values.images.backend }}
+          ports:
+            - containerPort: 8000
+          env:
+            - name: PYTHONUNBUFFERED
+              value: "1"
+            # Defined BEFORE DATABASE_URL, because $(POSTGRES_PASSWORD) below refers to it
+            - name: POSTGRES_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: {{ .Values.secretName }}
+                  key: {{ $pg.passwordKey }}
+            - name: DATABASE_URL
+              value: {{ printf "postgresql://%s:$(POSTGRES_PASSWORD)@postgres:5432/%s" $pg.user $pg.db | quote }}
+            # What the token says about who issued it (the public address)
+            - name: KEYCLOAK_ISSUER
+              value: {{ printf "https://%s/auth/realms/%s" .Values.domain .Values.keycloak.realm | quote }}
+            # Where to download Keycloak's public keys (inside the cluster)
+            - name: KEYCLOAK_JWKS_URL
+              value: {{ printf "http://keycloak:8080/auth/realms/%s/protocol/openid-connect/certs" .Values.keycloak.realm | quote }}
+            - name: KEYCLOAK_CLIENT_ID
+              value: {{ .Values.keycloak.clientId | quote }}
+          readinessProbe:
+            httpGet:
+              path: /api/v1/health
+              port: 8000
+            periodSeconds: 5
+          livenessProbe:
+            httpGet:
+              path: /api/v1/health
+              port: 8000
+            initialDelaySeconds: 30
+            periodSeconds: 20
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: backend
+spec:
+  selector:
+    app: backend
+  ports:
+    - port: 8000
+      targetPort: 8000

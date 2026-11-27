@@ -1,0 +1,25 @@
+domain: group-13-m7011e-ltu.se
+clusterIssuer: letsencrypt-staging    # change to letsencrypt-prod once staging works
+secretName: grocery-secrets
+
+images:
+  backend: ghcr.io/kasiisak/grocery-backend:v1
+  frontend: ghcr.io/kasiisak/grocery-frontend:v1
+  keycloak: quay.io/keycloak/keycloak:26.0.7
+  postgres: postgres:16-alpine
+
+keycloak:
+  realm: grocery
+  clientId: grocery-frontend
+
+databases:
+  postgres:
+    user: grocery
+    db: grocery
+    passwordKey: POSTGRES_PASSWORD        # key inside the Secret
+    storage: 1Gi
+  keycloak-db:
+    user: keycloak
+    db: keycloak
+    passwordKey: KEYCLOAK_DB_PASSWORD
+    storage: 1Gi
